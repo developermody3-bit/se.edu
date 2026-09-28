@@ -13,7 +13,6 @@ permissions:
 
 jobs:
   update-upload-time:
-    # Prevent the bot's own commit from starting another update cycle.
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
 
@@ -23,25 +22,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Update uploadDate in HTML files
-        env:
-          PUSH_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+      - name: Update uploadDate with workflow UTC time
         run: |
           python3 - <<'PY'
-          import os
           import re
           from pathlib import Path
-          from datetime import datetime
+          from datetime import datetime, timezone
 
           root = Path("mox")
-          timestamp = os.environ.get("PUSH_TIMESTAMP")
 
-          if not timestamp:
-              raise SystemExit("Missing PUSH_TIMESTAMP")
+          # Actual time when this GitHub Actions job starts, in UTC.
+          dt = datetime.now(timezone.utc)
 
-          dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-
-          # Format used by the generated pages.
           upload_value = dt.strftime("%B %-d, %YT%H:%M:%S+0000")
 
           pattern = re.compile(
@@ -65,18 +57,19 @@ jobs:
                   print(f"Updated: {html_file}")
 
           print(f"Updated {changed} HTML file(s).")
+          print(f"uploadDate UTC: {upload_value}")
           PY
 
-      - name: Commit updated upload times
+      - name: Commit updated upload dates
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           if git diff --quiet -- mox; then
-            echo "No upload time changes."
+            echo "No upload date changes."
             exit 0
           fi
 
           git add mox/
-          git commit -m "Update upload time [skip ci]"
+          git commit -m "Update upload date [skip ci]"
           git push
