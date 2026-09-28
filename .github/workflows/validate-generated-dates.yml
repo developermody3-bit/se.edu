@@ -1,0 +1,74 @@
+name: Validate generated dates
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "mox/**/*.html"
+      - "mox/*.html"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-dates:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate generated UTC dates
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          root = Path("mox")
+          pattern_upload = re.compile(r'"uploadDate"\s*:\s*"([^"]+)"', re.I)
+          pattern_published = re.compile(r'"datePublished"\s*:\s*"([^"]+)"', re.I)
+          pattern_publish = re.compile(r"publishDateTime\s*:\s*'([^']+)'", re.I)
+          iso = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+0000$')
+
+          checked = 0
+          failed = 0
+
+          for html_file in sorted(root.glob("*.html")):
+              text = html_file.read_text(encoding="utf-8")
+              upload = pattern_upload.search(text)
+              published = pattern_published.search(text)
+              publish = pattern_publish.search(text)
+
+              if not upload or not published:
+                  failed += 1
+                  print(f"FAIL: {html_file.name} — missing datePublished/uploadDate")
+                  continue
+
+              u = upload.group(1)
+              p = published.group(1)
+              checked += 1
+
+              if u != p:
+                  failed += 1
+                  print(f"FAIL: {html_file.name} — uploadDate != datePublished")
+                  print(f"  uploadDate:    {u}")
+                  print(f"  datePublished: {p}")
+                  continue
+
+              if not iso.fullmatch(u):
+                  failed += 1
+                  print(f"FAIL: {html_file.name} — date is not ISO 8601 UTC: {u}")
+                  continue
+
+              if publish and not publish.group(1).endswith(", UTC"):
+                  failed += 1
+                  print(f"FAIL: {html_file.name} — publishDateTime is not UTC: {publish.group(1)}")
+                  continue
+
+              print(f"OK: {html_file.name} — {u}")
+
+          print(f"Checked {checked} HTML file(s).")
+          if failed:
+              raise SystemExit(f"Validation failed for {failed} file(s).")
+          PY
