@@ -1,4 +1,4 @@
-name: Update upload time
+name: Validate generated dates
 
 on:
   push:
@@ -9,67 +9,36 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  update-upload-time:
-    if: github.actor != 'github-actions[bot]'
+  validate-dates:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Update uploadDate with workflow UTC time
+      - name: Validate uploadDate and datePublished
         run: |
           python3 - <<'PY'
           import re
           from pathlib import Path
-          from datetime import datetime, timezone
 
           root = Path("mox")
+          pattern_upload = re.compile(r'"uploadDate"\s*:\s*"([^"]+)"', re.I)
+          pattern_published = re.compile(r'"datePublished"\s*:\s*"([^"]+)"', re.I)
 
-          # Actual time when this GitHub Actions job starts, in UTC.
-          dt = datetime.now(timezone.utc)
-
-          upload_value = dt.strftime("%B %-d, %YT%H:%M:%S+0000")
-
-          pattern = re.compile(
-              r'("uploadDate"\s*:\s*")[^"]*(")',
-              re.IGNORECASE
-          )
-
-          changed = 0
-
+          checked = 0
           for html_file in root.glob("*.html"):
               text = html_file.read_text(encoding="utf-8")
+              upload = pattern_upload.search(text)
+              published = pattern_published.search(text)
+              if upload and published:
+                  checked += 1
+                  print(f"OK: {html_file.name}")
+                  print(f"  uploadDate: {upload.group(1)}")
+                  print(f"  datePublished: {published.group(1)}")
 
-              new_text, count = pattern.subn(
-                  lambda m: m.group(1) + upload_value + m.group(2),
-                  text
-              )
-
-              if count and new_text != text:
-                  html_file.write_text(new_text, encoding="utf-8")
-                  changed += 1
-                  print(f"Updated: {html_file}")
-
-          print(f"Updated {changed} HTML file(s).")
-          print(f"uploadDate UTC: {upload_value}")
+          print(f"Checked {checked} HTML file(s).")
           PY
-
-      - name: Commit updated upload dates
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if git diff --quiet -- mox; then
-            echo "No upload date changes."
-            exit 0
-          fi
-
-          git add mox/
-          git commit -m "Update upload date [skip ci]"
-          git push
