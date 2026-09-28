@@ -1,0 +1,82 @@
+name: Update upload time
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "mox/**/*.html"
+      - "mox/*.html"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-upload-time:
+    # Prevent the bot's own commit from starting another update cycle.
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update uploadDate in HTML files
+        env:
+          PUSH_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          from datetime import datetime
+
+          root = Path("mox")
+          timestamp = os.environ.get("PUSH_TIMESTAMP")
+
+          if not timestamp:
+              raise SystemExit("Missing PUSH_TIMESTAMP")
+
+          dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+
+          # Format used by the generated pages.
+          upload_value = dt.strftime("%B %-d, %YT%H:%M:%S+0000")
+
+          pattern = re.compile(
+              r'("uploadDate"\s*:\s*")[^"]*(")',
+              re.IGNORECASE
+          )
+
+          changed = 0
+
+          for html_file in root.glob("*.html"):
+              text = html_file.read_text(encoding="utf-8")
+
+              new_text, count = pattern.subn(
+                  lambda m: m.group(1) + upload_value + m.group(2),
+                  text
+              )
+
+              if count and new_text != text:
+                  html_file.write_text(new_text, encoding="utf-8")
+                  changed += 1
+                  print(f"Updated: {html_file}")
+
+          print(f"Updated {changed} HTML file(s).")
+          PY
+
+      - name: Commit updated upload times
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet -- mox; then
+            echo "No upload time changes."
+            exit 0
+          fi
+
+          git add mox/
+          git commit -m "Update upload time [skip ci]"
+          git push
